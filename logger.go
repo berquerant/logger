@@ -240,8 +240,6 @@ func initGlobalLogger() {
 
 // G returns the `GlobalLogger`.
 func G() GlobalLogger {
-	if globalLoggerInstance == nil {
-		globalLoggerInitOnce.Do(initGlobalLogger)
-	}
+	globalLoggerInitOnce.Do(initGlobalLogger)
 	return globalLoggerInstance
 }
