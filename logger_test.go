@@ -98,6 +98,24 @@ func TestProxy(t *testing.T) {
 		secondEvent = logger.NewEvent(logger.Linfo, "log 2", nil)
 	)
 
+	t.Run("no mappers", func(t *testing.T) {
+		p := logger.NewProxy()
+		var gotErr error
+		p.SetErrConsumer(func(err error) { gotErr = err })
+		p.Put(firstEvent)
+		assert.Nil(t, gotErr)
+	})
+
+	t.Run("single mapper", func(t *testing.T) {
+		f := &mockMapperList{
+			result: firstEvent,
+		}
+		p := logger.NewProxy(f)
+		p.Put(firstEvent)
+
+		eventEqual(t, firstEvent, f.got)
+	})
+
 	t.Run("error on second mappers", func(t *testing.T) {
 		f := &mockMapperList{
 			result: secondEvent,
@@ -169,6 +187,25 @@ func TestProxy(t *testing.T) {
 		eventEqual(t, firstEvent, f.got)
 		eventEqual(t, secondEvent, s.got)
 		assert.Nil(t, gotErr)
+	})
+
+	t.Run("modify proxy", func(t *testing.T) {
+		var gotErr error
+		p := logger.NewProxy()
+		p.SetErrConsumer(func(err error) { gotErr = err })
+		p.Put(firstEvent)
+		assert.Nil(t, gotErr)
+		_, ok := p.At(0)
+		assert.False(t, ok)
+
+		f := &mockMapperList{}
+		p.Append(f)
+		p.Put(firstEvent)
+		eventEqual(t, firstEvent, f.got)
+		assert.Nil(t, gotErr)
+		x, ok := p.At(0)
+		assert.True(t, ok)
+		assert.Equal(t, f, x)
 	})
 }
 

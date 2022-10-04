@@ -42,7 +42,8 @@ func ExampleLogger() {
 	l := &logger.Logger{
 		Proxy: logger.NewProxy(
 			logger.NewMapperList(levelToPrefix, format),
-			logger.NewMapperList(consumeInfo, consumeAll),
+			logger.NewMapperList(consumeInfo),
+			logger.NewMapperList(consumeAll),
 		),
 	}
 	l.Info("info msg")

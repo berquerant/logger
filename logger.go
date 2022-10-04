@@ -34,11 +34,9 @@ type mapperList struct {
 }
 
 func NewMapperList(v ...Mapper) MapperList {
-	var ml mapperList
-	for _, m := range v {
-		ml.Append(m)
+	return &mapperList{
+		mappers: v,
 	}
-	return &ml
 }
 
 func (ml *mapperList) Map(ev Event) (res Event, err error) {
@@ -65,10 +63,11 @@ func (ml *mapperList) Append(f Mapper) {
 
 // Proxy accepts an event and processes it.
 type Proxy interface {
-	// First returns the first level mappers.
-	First() MapperList
-	// Second returns the second level mappers.
-	Second() MapperList
+	// Append appends the mapper list to the end of the list.
+	Append(list MapperList)
+	// At returns the i-th mapper list.
+	// Returns false if out of range.
+	At(i int) (MapperList, bool)
 	// Put starts processing of the event.
 	// Apply the first mappers the event, then the second.
 	Put(ev Event)
@@ -76,35 +75,57 @@ type Proxy interface {
 }
 
 type proxy struct {
-	first       MapperList
-	second      MapperList
+	sync.RWMutex
+	list        []MapperList
 	errConsumer ErrConsumer
 }
 
-func NewProxy(first, second MapperList) Proxy {
+func NewProxy(list ...MapperList) Proxy {
 	return &proxy{
-		first:  first,
-		second: second,
+		list: list,
 	}
 }
 
-func (p *proxy) First() MapperList                      { return p.first }
-func (p *proxy) Second() MapperList                     { return p.second }
-func (p *proxy) SetErrConsumer(errConsumer ErrConsumer) { p.errConsumer = errConsumer }
+func (p *proxy) Append(list MapperList) {
+	p.Lock()
+	defer p.Unlock()
+	p.list = append(p.list, list)
+}
+
+func (p *proxy) At(i int) (MapperList, bool) {
+	p.RLock()
+	defer p.RUnlock()
+	if i < 0 || i >= len(p.list) {
+		return nil, false
+	}
+	return p.list[i], true
+}
+
+func (p *proxy) SetErrConsumer(errConsumer ErrConsumer) {
+	p.Lock()
+	defer p.Unlock()
+	p.errConsumer = errConsumer
+}
 
 func (p *proxy) consumeErr(err error) {
+	p.RLock()
+	defer p.RUnlock()
 	if p.errConsumer != nil {
 		p.errConsumer(err)
 	}
 }
+
 func (p *proxy) Put(ev Event) {
-	r, err := p.first.Map(ev)
-	if err != nil {
-		p.consumeErr(err)
-		return
+	p.RLock()
+	defer p.RUnlock()
+
+	var err error
+	for _, ml := range p.list {
+		if ev, err = ml.Map(ev); err != nil {
+			p.consumeErr(err)
+			return
+		}
 	}
-	_, err = p.second.Map(r)
-	p.consumeErr(err)
 }
 
 // LogLevelFilter ignores an event with the lower level.
