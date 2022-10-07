@@ -302,3 +302,43 @@ func TestLogLevelFilter(t *testing.T) {
 		})
 	}
 }
+
+func TestDistribute(t *testing.T) {
+	var (
+		errFirst   = errors.New("first")
+		firstEvent = logger.NewEvent(logger.Ldebug, "log 1", nil)
+	)
+
+	t.Run("empty", func(t *testing.T) {
+		got, err := logger.Distribute()(firstEvent)
+		assert.Nil(t, err)
+		eventEqual(t, firstEvent, got)
+	})
+
+	checkEventMapper := func(t *testing.T, target logger.Event, err error) logger.Mapper {
+		return func(ev logger.Event) (logger.Event, error) {
+			eventEqual(t, target, ev)
+			return ev, err
+		}
+	}
+
+	t.Run("single mapper", func(t *testing.T) {
+		got, err := logger.Distribute(checkEventMapper(t, firstEvent, nil))(firstEvent)
+		assert.Nil(t, err)
+		eventEqual(t, firstEvent, got)
+	})
+
+	t.Run("2 mappers", func(t *testing.T) {
+		m := checkEventMapper(t, firstEvent, nil)
+		got, err := logger.Distribute(m, m)(firstEvent)
+		assert.Nil(t, err)
+		eventEqual(t, firstEvent, got)
+	})
+
+	t.Run("2 mappers return an error", func(t *testing.T) {
+		m := checkEventMapper(t, firstEvent, errFirst)
+		got, err := logger.Distribute(m, m)(firstEvent)
+		assert.Nil(t, err)
+		eventEqual(t, firstEvent, got)
+	})
+}

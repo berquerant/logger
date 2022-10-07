@@ -18,6 +18,18 @@ type (
 	ErrConsumer func(error)
 )
 
+// Distribute returns a new Mapper that calls each mapper with the same event whether or not
+// a mapper returns an error.
+// The new Mapper returns the given event without an error.
+func Distribute(v ...Mapper) Mapper {
+	return func(ev Event) (Event, error) {
+		for _, f := range v {
+			_, _ = f(ev)
+		}
+		return ev, nil
+	}
+}
+
 // MapperList is a set of event conversions.
 // In order from the top of the list, applies the mapper to the event.
 type MapperList interface {
