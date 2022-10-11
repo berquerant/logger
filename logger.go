@@ -6,142 +6,38 @@ import (
 	"sync"
 )
 
-// Level is the threshold for logging.
-type Level int
-
-//go:generate go run github.com/berquerant/dataclass@latest -type Event -field "Level Level,Format string,Args []any" -output event_generated.go
-
-type (
-	// Mapper converts and/or filters the log event.
-	Mapper func(Event) (Event, error)
-	// ErrConsumer receives an error during mappings.
-	ErrConsumer func(error)
-)
-
-// Distribute returns a new Mapper that calls each mapper with the same event whether or not
-// a mapper returns an error.
-// The new Mapper returns the given event without an error.
-func Distribute(v ...Mapper) Mapper {
-	return func(ev Event) (Event, error) {
-		for _, f := range v {
-			_, _ = f(ev)
-		}
-		return ev, nil
-	}
-}
-
-// MapperList is a set of event conversions.
-// In order from the top of the list, applies the mapper to the event.
-type MapperList interface {
-	// Append appends a Mapper to the end of the list.
-	Append(f Mapper)
-	// Map applies the mappers to the event.
-	// If the mapper returns a nil event or an error then cancels the propagation.
-	Map(ev Event) (Event, error)
-}
-
-type mapperList struct {
-	mappers []Mapper
-	mux     sync.RWMutex
-}
-
-func NewMapperList(v ...Mapper) MapperList {
-	return &mapperList{
-		mappers: v,
-	}
-}
-
-func (ml *mapperList) Map(ev Event) (res Event, err error) {
-	ml.mux.RLock()
-	defer ml.mux.RUnlock()
-	res = ev
-	for i, m := range ml.mappers {
-		if res == nil {
-			return
-		}
-		if res, err = m(res); err != nil {
-			err = fmt.Errorf("Map error idx %d ev %s %w", i, res, err)
-			return
-		}
-	}
-	return
-}
-
-func (ml *mapperList) Append(f Mapper) {
-	ml.mux.Lock()
-	defer ml.mux.Unlock()
-	ml.mappers = append(ml.mappers, f)
-}
-
-// Proxy accepts an event and processes it.
 type Proxy interface {
-	// Append appends the mapper list to the end of the list.
-	Append(list MapperList)
-	// At returns the i-th mapper list.
-	// Returns false if out of range.
-	At(i int) (MapperList, bool)
-	// Put starts processing of the event.
-	// Apply the first mappers the event, then the second.
-	Put(ev Event)
-	SetErrConsumer(ErrConsumer)
+	Put(event Event)
+	SetErrConsumer(func(error))
 }
 
 type proxy struct {
-	sync.RWMutex
-	list        []MapperList
-	errConsumer ErrConsumer
+	mapper      MapperFunc
+	errConsumer func(error)
 }
 
-func NewProxy(list ...MapperList) Proxy {
+func NewProxy(mapper MapperFunc) Proxy {
 	return &proxy{
-		list: list,
+		mapper: mapper,
 	}
 }
 
-func (p *proxy) Append(list MapperList) {
-	p.Lock()
-	defer p.Unlock()
-	p.list = append(p.list, list)
-}
-
-func (p *proxy) At(i int) (MapperList, bool) {
-	p.RLock()
-	defer p.RUnlock()
-	if i < 0 || i >= len(p.list) {
-		return nil, false
-	}
-	return p.list[i], true
-}
-
-func (p *proxy) SetErrConsumer(errConsumer ErrConsumer) {
-	p.Lock()
-	defer p.Unlock()
-	p.errConsumer = errConsumer
-}
+func (p *proxy) SetErrConsumer(errConsumer func(error)) { p.errConsumer = errConsumer }
 
 func (p *proxy) consumeErr(err error) {
-	p.RLock()
-	defer p.RUnlock()
 	if p.errConsumer != nil {
 		p.errConsumer(err)
 	}
 }
 
 func (p *proxy) Put(ev Event) {
-	p.RLock()
-	defer p.RUnlock()
-
-	var err error
-	for _, ml := range p.list {
-		if ev, err = ml.Map(ev); err != nil {
-			p.consumeErr(err)
-			return
-		}
+	if _, err := p.mapper.Call(ev); err != nil {
+		p.consumeErr(err)
 	}
 }
 
 // LogLevelFilter ignores an event with the lower level.
-func LogLevelFilter(level Level) Mapper {
+func LogLevelFilter(level Level) MapperFunc {
 	return func(ev Event) (Event, error) {
 		if ev.Level() <= level {
 			return ev, nil
@@ -219,8 +115,7 @@ func StandardLogConsumer(ev Event) (Event, error) {
 func NewDefault(level Level) *Logger {
 	return &Logger{
 		Proxy: NewProxy(
-			NewMapperList(LogLevelFilter(level), LogLevelToPrefixMapper),
-			NewMapperList(StandardLogConsumer),
+			MustNewMapperFunc(LogLevelFilter(level)).Next(LogLevelToPrefixMapper).Next(StandardLogConsumer),
 		),
 	}
 }
@@ -256,8 +151,7 @@ func newGlobalLogger() *globalLogger {
 		Logger: &Logger{},
 	}
 	g.Proxy = NewProxy(
-		NewMapperList(g.logLevelFilter, LogLevelToPrefixMapper),
-		NewMapperList(StandardLogConsumer),
+		MustNewMapperFunc(g.logLevelFilter).Next(LogLevelToPrefixMapper).Next(StandardLogConsumer),
 	)
 	return g
 }
