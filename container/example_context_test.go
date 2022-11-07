@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/berquerant/logger"
 	"github.com/berquerant/logger/container"
 )
 
@@ -14,7 +15,8 @@ func ExampleContext() {
 
 	ctx := container.New(map[string]any{
 		"RequestID": "stone1",
-	}).WithContext(context.TODO())
+	}, logger.MustNewMapperFunc(logger.LogLevelToPrefixMapper).
+		Next(logger.StandardLogConsumer)).WithContext(context.TODO())
 
 	c1 := container.FromContext(ctx)
 	c1.L().Info("first")

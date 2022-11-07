@@ -83,6 +83,9 @@ func (m MapperFunc) Next(f any) MapperFunc {
 	if m == nil {
 		return mapper
 	}
+	if mapper == nil {
+		return m
+	}
 	return func(event Event) (Event, error) {
 		event, err := m.Call(event)
 		if err != nil {
@@ -106,6 +109,9 @@ func (m MapperFunc) Via(f any) MapperFunc {
 	mapper, _ := intoMapperFunc(f)
 	if m == nil {
 		return mapper
+	}
+	if mapper == nil {
+		return m
 	}
 	return func(event Event) (Event, error) {
 		event, err := m.Call(event)
